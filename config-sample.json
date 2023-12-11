@@ -1,0 +1,12 @@
+{
+  "DB": {
+    "Host": "localhost",
+    "Port": 5432,
+    "DBname": "postgres",
+    "User:": "postgres",
+    "Pass": "password"
+  },
+  "ApiKeys": {
+    "openaiApikey": "your key here"
+  }
+}
