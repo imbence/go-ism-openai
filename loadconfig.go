@@ -6,6 +6,10 @@ import (
 	"os"
 )
 
+var (
+	config Config
+)
+
 type Config struct {
 	DB struct {
 		Host   string `json:"Host"`

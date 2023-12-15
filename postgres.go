@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -58,34 +59,64 @@ func toDB(columnnames []string, schema string, table string, rowvalues []string,
 	return err
 }
 
-func fromDB(columname string, schema string, table string, otherargs string) []string {
-	var cellvalues []string
+func getManReports() []ManReport {
 
-	//put together the query
-	sqlStatement := "SELECT " + columname + " FROM " + schema + "." + table + " " + otherargs
-
-	//send query to database
-	rows, err := db.Query(sqlStatement)
+	var manReports []ManReport
+	query := "SELECT json_agg(man_reports) FROM ism.man_reports"
+	rows, err := db.Query(query)
 	if err != nil {
-		log.Println("DB Query failed: " + err.Error())
+		log.Fatal(err)
 	}
-
-	//close the rows
 	defer func(rows *sql.Rows) {
-		err = rows.Close()
+		err := rows.Close()
 		if err != nil {
-			log.Println(err)
+			log.Fatal(err)
 		}
 	}(rows)
 
-	//get the values
-	for rows.Next() {
-		var cellvalue string
-		err = rows.Scan(&cellvalue)
+	var cellValue string
+	if rows.Next() {
+		err := rows.Scan(&cellValue)
 		if err != nil {
 			log.Println(err)
 		}
-		cellvalues = append(cellvalues, cellvalue)
+		err = json.Unmarshal([]byte(cellValue), &manReports)
+		if err != nil {
+			log.Println("Unmarshal json from DB: " + err.Error())
+		}
+	} else {
+		fmt.Println("No rows found")
 	}
-	return cellvalues
+
+	return manReports
+}
+
+func dbQuery(query string, queryResult interface{}) interface{} {
+
+	rows, err := db.Query(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}(rows)
+
+	var cellValue string
+	if rows.Next() {
+		err := rows.Scan(&cellValue)
+		if err != nil {
+			log.Println(err)
+		}
+		err = json.Unmarshal([]byte(cellValue), &queryResult)
+		if err != nil {
+			log.Println("Unmarshal json from DB: " + err.Error())
+		}
+	} else {
+		fmt.Println("No rows found")
+	}
+
+	return queryResult
 }

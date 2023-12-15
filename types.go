@@ -1,8 +1,8 @@
 package main
 
-type ManReports struct {
+type ManReport struct {
 	Date                     string `json:"date"`
-	Into                     string `json:"into"`
+	Intro                    string `json:"intro"`
 	OverallRank              string `json:"overall_rank"`
 	Respondents              string `json:"respondents"`
 	Commodities              string `json:"commodities"`
@@ -28,4 +28,10 @@ type ManReports struct {
 	Imports                  string `json:"imports"`
 	ImportsRank              string `json:"imports_rank"`
 	BuyingPolicy             string `json:"buying_policy"`
+}
+
+type AiRequest []struct {
+	ID      string   `json:"id"`
+	Content string   `json:"content"`
+	Target  []string `json:"target"`
 }
