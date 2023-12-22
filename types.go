@@ -1,37 +1,38 @@
 package main
 
-type ManReport struct {
-	Date                     string `json:"date"`
-	Intro                    string `json:"intro"`
-	OverallRank              string `json:"overall_rank"`
-	Respondents              string `json:"respondents"`
-	Commodities              string `json:"commodities"`
-	ManufacturingPmi         string `json:"manufacturing_pmi"`
-	NewOrders                string `json:"new_orders"`
-	NewOrdersRank            string `json:"new_orders_rank"`
-	Production               string `json:"production"`
-	ProductionRank           string `json:"production_rank"`
-	Employment               string `json:"employment"`
-	EmploymentRank           string `json:"employment_rank"`
-	SupplierDeliveries       string `json:"supplier_deliveries"`
-	SupplierDeliveriesRank   string `json:"supplier_deliveries_rank"`
-	Inventories              string `json:"inventories"`
-	InventoriesRank          string `json:"inventories_rank"`
-	CustomersInventories     string `json:"customers_inventories"`
-	CustomersInventoriesRank string `json:"customers_inventories_rank"`
-	Prices                   string `json:"prices"`
-	PricesRank               string `json:"prices_rank"`
-	BacklogOfOrders          string `json:"backlog_of_orders"`
-	BacklogOfOrdersRank      string `json:"backlog_of_orders_rank"`
-	NewExportOrders          string `json:"new_export_orders"`
-	NewExportOrdersRank      string `json:"new_export_orders_rank"`
-	Imports                  string `json:"imports"`
-	ImportsRank              string `json:"imports_rank"`
-	BuyingPolicy             string `json:"buying_policy"`
+type AiResponse struct {
+	ID        string `json:"id"`
+	Object    string `json:"object"`
+	CreatedAt int    `json:"created_at"`
+	Choices   []struct {
+		Index   int `json:"index"`
+		Message struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
 }
 
-type AiRequest []struct {
-	ID      string   `json:"id"`
-	Content string   `json:"content"`
-	Target  []string `json:"target"`
+type Report struct {
+	Date    string `json:"date"`
+	Part    string `json:"part"`
+	Content string `json:"content"`
+}
+
+type AiIndustryRanks struct {
+	Date     string `json:"date"`
+	Industry string `json:"industry"`
+	Part     string `json:"part"`
+	Rank     int    `json:"rank"`
+	Comment  string `json:"comment"`
+}
+
+type PrimaryKey struct {
+	ColumnName string `json:"column_name"`
 }

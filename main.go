@@ -1,32 +1,62 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"strings"
 )
 
 func main() {
 	config, _ = LoadConfiguration("config.json")
 
-	//connect to the database
+	// Connect to the database
 	err := connectDB(true, config)
 	if err != nil {
 		log.Println("Error connecting to database: " + err.Error())
 	}
 
-	var manReports []ManReport
-	manReports = getManReports()
+	// todo: get dates from database
+	var dates []string = []string{"2023-10-02", "2023-11-01"}
+	var queryDates = "'" + strings.Join(dates, "', '") + "'"
 
-	var requestText AiRequest
-	requestText = dbQuery("SELECT json_agg(ai_request) FROM ism.ai_request where id = $$ranking2$$", requestText).(AiRequest)
+	// Get the reports
+	var rankReport []Report
+	var query string = fmt.Sprintf("select json_agg(x) from(select date, part, ar.content || ' ' || r.content as content FROM ism.reports r LEFT JOIN ism.ai_request ar ON r.part = ANY (ar.target_part) WHERE r.part = ANY (ar.target_part) and id = $$ranking3$$ and date in (%s)) x;", queryDates)
+	err = dbQuery(query, &rankReport)
+	if err != nil {
+		log.Println("Error querying database: " + err.Error())
+	}
 
-	//run the AI
-	aiResult := AiMagic(requestText[0].Content + manReports[0].BacklogOfOrdersRank)
+	// Do the AI magic
+	var aiResponse []AiResponse
+	var aiIndustryRanks []AiIndustryRanks
+	for i := range rankReport {
+		fmt.Println("AI magic for: " + rankReport[i].Part)
+		aiResponse = append(aiResponse, AiMagic(rankReport[i].Content))
 
-	println(aiResult.Choices[0].Message.Content)
+		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiIndustryRanks); err != nil {
+			log.Println("Error unmarshalling json: " + err.Error())
+		}
+		for x := range aiIndustryRanks {
+			aiIndustryRanks[x].Date = rankReport[i].Date
+			aiIndustryRanks[x].Part = rankReport[i].Part
+			fmt.Println(aiIndustryRanks[x].Industry, aiIndustryRanks[x].Rank)
+		}
+		// todo send to database
+		err = toDB("ism", "ai_industry_ranks", aiIndustryRanks)
+		if err != nil {
+			log.Println("Error sending to database: " + err.Error())
+		}
 
-	//close the database
+		// Clear the slice
+		aiIndustryRanks = aiIndustryRanks[:0]
+	}
+
+	// Close the database connection
 	err = connectDB(false, config)
 	if err != nil {
 		log.Println("Error closing database: " + err.Error())
 	}
+
 }

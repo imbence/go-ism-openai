@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func connectDB(state bool, config Config) error {
 	}
 }
 
-func toDB(columnnames []string, schema string, table string, rowvalues []string, primarykey string) error {
+func toDBb(columnnames []string, schema string, table string, rowvalues []string, primarykey string) error {
 	//https://golangdocs.com/golang-postgresql-example
 	var err error
 	var onconflict string
@@ -59,64 +60,89 @@ func toDB(columnnames []string, schema string, table string, rowvalues []string,
 	return err
 }
 
-func getManReports() []ManReport {
+func toDB(schema string, table string, data interface{}) error {
 
-	var manReports []ManReport
-	query := "SELECT json_agg(man_reports) FROM ism.man_reports"
-	rows, err := db.Query(query)
+	var err error
+	var columnName []string
+	var primaryKey []PrimaryKey
+	var primaryKeyColumn []string
+	//var cellValue []string
+	//var rowValue []string
+
+	primaryKeyQuery := fmt.Sprintf("select json_agg(x) from (SELECT column_name FROM information_schema.key_column_usage WHERE table_name = '%s' and table_schema = '%s') x", table, schema)
+	err = dbQuery(primaryKeyQuery, &primaryKey)
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}(rows)
-
-	var cellValue string
-	if rows.Next() {
-		err := rows.Scan(&cellValue)
-		if err != nil {
-			log.Println(err)
-		}
-		err = json.Unmarshal([]byte(cellValue), &manReports)
-		if err != nil {
-			log.Println("Unmarshal json from DB: " + err.Error())
-		}
-	} else {
-		fmt.Println("No rows found")
+		log.Println("Error querying database: " + err.Error())
+		return err
 	}
 
-	return manReports
+	//build primary key string
+	for i := range primaryKey {
+		primaryKeyColumn = append(primaryKeyColumn, primaryKey[i].ColumnName)
+	}
+	primaryKeyString := strings.Join(primaryKeyColumn, ", ")
+	onConflictKeyString := "excluded." + strings.Join(primaryKeyColumn, ", excluded.")
+
+	//get column names from struct
+	t := reflect.TypeOf(data)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		columnName = append(columnName, field.Name)
+	}
+	columnNameString := strings.Join(columnName, ", ")
+
+	// todo: or this
+	t = reflect.TypeOf(data)
+	v := reflect.ValueOf(data)
+
+	// Loop through the fields of the struct
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		columnName = append(columnName, field.Name)
+		value := v.Field(i).Interface()
+
+		fmt.Printf("%s: %v\n", field.Name, value)
+	}
+
+	//put together the query
+	sqlStatement := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES %s ON CONFLICT (%s) DO UPDATE SET %s", schema, table, columnNameString, "", primaryKeyString, onConflictKeyString)
+
+	//send query to database
+	_, err = db.Exec(sqlStatement)
+	if err != nil {
+		log.Println("Send query to database failed: " + err.Error() + " Table: " + table)
+	}
+
+	return err
 }
 
-func dbQuery(query string, queryResult interface{}) interface{} {
+func dbQuery(query string, queryResult interface{}) error {
 
 	rows, err := db.Query(query)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Error querying database: " + err.Error())
+		return err
 	}
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-			log.Fatal(err)
+			return //error already logged
 		}
 	}(rows)
 
 	var cellValue string
+
 	if rows.Next() {
 		err := rows.Scan(&cellValue)
 		if err != nil {
-			log.Println(err)
+			return err
 		}
 		err = json.Unmarshal([]byte(cellValue), &queryResult)
 		if err != nil {
-			log.Println("Unmarshal json from DB: " + err.Error())
+			return err
 		}
 	} else {
 		fmt.Println("No rows found")
 	}
-
-	return queryResult
+	return nil
 }
