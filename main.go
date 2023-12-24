@@ -17,7 +17,7 @@ func main() {
 	}
 
 	// todo: get dates from database
-	var dates []string = []string{"2023-10-02", "2023-11-01"}
+	var dates []string = []string{"2023-07-03"}
 	var queryDates = "'" + strings.Join(dates, "', '") + "'"
 
 	// Get the reports
@@ -32,7 +32,7 @@ func main() {
 	var aiResponse []AiResponse
 	var aiIndustryRanks []AiIndustryRanks
 	for i := range rankReport {
-		fmt.Println("AI magic for: " + rankReport[i].Part)
+		fmt.Println("AI magic for: ", rankReport[i].Date, rankReport[i].Part)
 		aiResponse = append(aiResponse, AiMagic(rankReport[i].Content))
 
 		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiIndustryRanks); err != nil {
@@ -41,9 +41,8 @@ func main() {
 		for x := range aiIndustryRanks {
 			aiIndustryRanks[x].Date = rankReport[i].Date
 			aiIndustryRanks[x].Part = rankReport[i].Part
-			fmt.Println(aiIndustryRanks[x].Industry, aiIndustryRanks[x].Rank)
 		}
-		// todo send to database
+
 		err = toDB("ism", "ai_industry_ranks", aiIndustryRanks)
 		if err != nil {
 			log.Println("Error sending to database: " + err.Error())
