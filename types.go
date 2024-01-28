@@ -20,9 +20,9 @@ type AiResponse struct {
 }
 
 type Report struct {
-	Date    string `json:"date"`
-	Part    string `json:"part"`
-	Content string `json:"content"`
+	Date    string `db:"date"`
+	Part    string `db:"part"`
+	Content string `db:"content"`
 }
 
 type AiIndustryRanks struct {

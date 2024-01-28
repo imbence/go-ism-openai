@@ -1,32 +1,37 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/json"
 	"fmt"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 	"log"
 	"reflect"
 	"strings"
 	"time"
-
-	_ "github.com/lib/pq"
 )
 
 var (
-	db *sql.DB
+	db *sqlx.DB
 )
 
 func connectDB(state bool, config Config) error {
 	var err error
 	if state {
 		psqlInfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.DB.Host, config.DB.Port, config.DB.User, config.DB.Pass, config.DB.DBname)
-		db, err = sql.Open("postgres", psqlInfo)
+		db, err = sqlx.Connect("postgres", psqlInfo)
 		if err != nil {
 			return err
 		}
+		//defer func(db *sqlx.DB) {
+		//	err := db.Close()
+		//	if err != nil {
+		//		log.Fatal("Error closing the database:", err)
+		//	}
+		//}(db)
 		db.SetMaxOpenConns(10)
 		db.SetMaxIdleConns(5)
 		db.SetConnMaxIdleTime(30 * time.Minute)
+		log.Printf("Connected to database %s\n", config.DB.DBname)
 		return nil
 	} else {
 		err = db.Close()
@@ -74,7 +79,7 @@ func toDB(schema string, table string, data interface{}) error {
 
 	//get primary key
 	primaryKeyQuery := fmt.Sprintf("SELECT column_name FROM information_schema.key_column_usage WHERE table_name = '%s' and table_schema = '%s'", table, schema)
-	err = dbQuery(primaryKeyQuery, &primaryKey)
+	err = db.Select(&primaryKey, primaryKeyQuery)
 	if err != nil {
 		log.Println("Error finding target table key columns in database: " + err.Error())
 		return err
@@ -102,35 +107,4 @@ func toDB(schema string, table string, data interface{}) error {
 	}
 
 	return err
-}
-
-func dbQuery(query string, queryResult interface{}) error {
-
-	rows, err := db.Query(fmt.Sprintf("select json_agg(x) from(%s) x", query))
-	if err != nil {
-		log.Println("Error querying database: " + err.Error())
-		return err
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			return //error already logged
-		}
-	}(rows)
-
-	var cellValue string
-
-	if rows.Next() {
-		err := rows.Scan(&cellValue)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal([]byte(cellValue), &queryResult)
-		if err != nil {
-			return err
-		}
-	} else {
-		fmt.Println("No rows found")
-	}
-	return nil
 }
