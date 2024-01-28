@@ -26,13 +26,18 @@ type Report struct {
 }
 
 type AiIndustryRanks struct {
-	Date     string `json:"date"`
-	Industry string `json:"industry"`
-	Part     string `json:"part"`
-	Rank     int    `json:"rank"`
-	Comment  string `json:"comment"`
+	Date        string `json:"date"`
+	Industry    string `json:"industry"`
+	Part        string `json:"part"`
+	Rank        int    `json:"rank"`
+	AiRequestID string `json:"ai_request_id"`
+	//Comment     string `json:"comment"`
 }
 
 type PrimaryKey struct {
 	ColumnName string `json:"column_name"`
+}
+
+type Dates struct {
+	Date string `json:"date"`
 }

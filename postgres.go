@@ -22,7 +22,6 @@ func connectDB(state bool, config Config) error {
 		psqlInfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.DB.Host, config.DB.Port, config.DB.User, config.DB.Pass, config.DB.DBname)
 		db, err = sql.Open("postgres", psqlInfo)
 		if err != nil {
-			log.Println(err)
 			return err
 		}
 		db.SetMaxOpenConns(10)
@@ -63,7 +62,7 @@ func toDB(schema string, table string, data interface{}) error {
 			for j := 0; j < dataType.NumField(); j++ {
 				field := dataType.Field(j)
 				if i == 0 {
-					columnName = append(columnName, field.Name)
+					columnName = append(columnName, field.Tag.Get("json"))
 				}
 				cellValue = append(cellValue, fmt.Sprintf("'%v'", item.FieldByName(field.Name)))
 			}
@@ -74,10 +73,10 @@ func toDB(schema string, table string, data interface{}) error {
 	rowValuesString = strings.Join(rowValue, ", ")
 
 	//get primary key
-	primaryKeyQuery := fmt.Sprintf("select json_agg(x) from (SELECT column_name FROM information_schema.key_column_usage WHERE table_name = '%s' and table_schema = '%s') x", table, schema)
+	primaryKeyQuery := fmt.Sprintf("SELECT column_name FROM information_schema.key_column_usage WHERE table_name = '%s' and table_schema = '%s'", table, schema)
 	err = dbQuery(primaryKeyQuery, &primaryKey)
 	if err != nil {
-		log.Println("Error querying database: " + err.Error())
+		log.Println("Error finding target table key columns in database: " + err.Error())
 		return err
 	}
 	//build primary key string
@@ -99,6 +98,7 @@ func toDB(schema string, table string, data interface{}) error {
 	_, err = db.Exec(sqlStatement)
 	if err != nil {
 		log.Println("Send query to database failed: " + err.Error() + " Table: " + table)
+		log.Println(sqlStatement)
 	}
 
 	return err
@@ -106,7 +106,7 @@ func toDB(schema string, table string, data interface{}) error {
 
 func dbQuery(query string, queryResult interface{}) error {
 
-	rows, err := db.Query(query)
+	rows, err := db.Query(fmt.Sprintf("select json_agg(x) from(%s) x", query))
 	if err != nil {
 		log.Println("Error querying database: " + err.Error())
 		return err
