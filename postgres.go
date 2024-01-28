@@ -1,43 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	"github.com/georgysavva/scany/v2/pgxscan"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
 	"reflect"
 	"strings"
-	"time"
 )
 
 var (
-	db *sqlx.DB
+	db *pgxpool.Pool
 )
-
-func connectDB(state bool, config Config) error {
-	var err error
-	if state {
-		psqlInfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.DB.Host, config.DB.Port, config.DB.User, config.DB.Pass, config.DB.DBname)
-		db, err = sqlx.Connect("postgres", psqlInfo)
-		if err != nil {
-			return err
-		}
-		//defer func(db *sqlx.DB) {
-		//	err := db.Close()
-		//	if err != nil {
-		//		log.Fatal("Error closing the database:", err)
-		//	}
-		//}(db)
-		db.SetMaxOpenConns(10)
-		db.SetMaxIdleConns(5)
-		db.SetConnMaxIdleTime(30 * time.Minute)
-		log.Printf("Connected to database %s\n", config.DB.DBname)
-		return nil
-	} else {
-		err = db.Close()
-		return err
-	}
-}
 
 func toDB(schema string, table string, data interface{}) error {
 
@@ -69,7 +44,7 @@ func toDB(schema string, table string, data interface{}) error {
 				if i == 0 {
 					columnName = append(columnName, field.Tag.Get("json"))
 				}
-				cellValue = append(cellValue, fmt.Sprintf("'%v'", item.FieldByName(field.Name)))
+				cellValue = append(cellValue, fmt.Sprintf("$$%v$$", item.FieldByName(field.Name)))
 			}
 			rowValue = append(rowValue, "("+strings.Join(cellValue, ", ")+")")
 		}
@@ -79,7 +54,7 @@ func toDB(schema string, table string, data interface{}) error {
 
 	//get primary key
 	primaryKeyQuery := fmt.Sprintf("SELECT column_name FROM information_schema.key_column_usage WHERE table_name = '%s' and table_schema = '%s'", table, schema)
-	err = db.Select(&primaryKey, primaryKeyQuery)
+	err = pgxscan.Select(context.Background(), db, &primaryKey, primaryKeyQuery)
 	if err != nil {
 		log.Println("Error finding target table key columns in database: " + err.Error())
 		return err
@@ -100,10 +75,10 @@ func toDB(schema string, table string, data interface{}) error {
 	sqlStatement := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES %s ON CONFLICT (%s) DO UPDATE SET %s", schema, table, columnNameString, rowValuesString, primaryKeyString, onConflictKeyString)
 
 	//send query to database
-	_, err = db.Exec(sqlStatement)
+	_, err = db.Exec(context.Background(), sqlStatement)
 	if err != nil {
-		log.Println("Send query to database failed: " + err.Error() + " Table: " + table)
 		log.Println(sqlStatement)
+		log.Println("Send query to database failed: " + err.Error() + " Table: " + table)
 	}
 
 	return err

@@ -1,18 +1,14 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jmoiron/sqlx"
-	"github.com/lib/pq"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
+	"github.com/georgysavva/scany/v2/pgxscan"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
 	"strings"
+	_ "strings"
 )
 
 func main() {
@@ -22,152 +18,101 @@ func main() {
 	if err != nil {
 		log.Println("Error loading configuration: " + err.Error())
 	}
+	dbUrl := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", config.DB.User, config.DB.Pass, config.DB.Host, config.DB.Port, config.DB.DBname)
 
 	// Connect to the database
-	err = connectDB(true, config)
+	db, err = pgxpool.New(context.Background(), dbUrl)
 	if err != nil {
-		log.Println("Error connecting to database: " + err.Error())
+		log.Fatal("Error connecting to database: " + err.Error())
 	}
-	defer func(state bool, config Config) {
-		err := connectDB(state, config)
-		if err != nil {
+	defer db.Close()
 
-		}
-	}(false, config)
+	// todo: start the magic from Grafana
+	// todo: implement db listener
 
-	type Person struct {
-		FirstName string `db:"first_name"`
-		LastName  string `db:"last_name"`
-		Email     string
-	}
+	//Run the AI on the reports
+	var rankReportPart []Report
+	getReportData("ranking3", []string{"2022-02-01"}, &rankReportPart)
+	runAiOnReports(rankReportPart)
 
-	personStructs := []Person{
-		{FirstName: "Ardie", LastName: "Savea", Email: "aaaaaaa"},
-		{FirstName: "Sonny Bill", LastName: "Williams", Email: "bbbbbbbb"},
-		{FirstName: "Ngani", LastName: "Laumape", Email: "cccccc"},
-	}
-	var res sql.Result
-	var query string = `INSERT INTO person (first_name, last_name, email) VALUES (:first_name, :last_name, :email) ON CONFLICT (first_name) DO UPDATE SET first_name = excluded.first_name, last_name  = excluded.last_name, email = excluded.email`
-	res, err = db.NamedExec(query, personStructs)
+	// Run the AI on the comments
+	var commentReportPart []Report
+	getReportData("respondents1", []string{"2024-01-02", "2023-12-04", "2023-11-01", "2023-10-02", "2023-09-01", "2023-08-01", "2023-07-03", "2023-06-01", "2023-05-01", "2023-04-03", "2023-03-01", "2023-02-01", "2023-01-04", "2022-12-01", "2022-11-01", "2022-10-03", "2022-09-01", "2022-08-01", "2022-07-01", "2022-06-01", "2022-05-02", "2022-04-01", "2022-03-01", "2022-02-01", "2022-01-04"}, &commentReportPart)
+	runAiOnComments(commentReportPart)
 
-	println(res.RowsAffected())
-	println(res.LastInsertId())
+}
+func getReportData(aiRequestID string, reportDate []string, reportPart interface{}) {
+	var err error
+	var reportDates = "'" + strings.Join(reportDate, "', '") + "'"
+	var sqlStatement = fmt.Sprintf(
+		`select date::text, part, ar.content || ' ' || r.content as content, target_table, id as ai_request_id
+				FROM ism.reports r 
+				LEFT JOIN ism.ai_request ar ON r.part = ANY (ar.target_part) 
+				WHERE r.part = ANY (ar.target_part) and id = $$%s$$ and date in (%s)`,
+		aiRequestID, reportDates)
 
-	// todo: get dates from database
-	var dates []string = []string{"2022-02-01"}
-	var reportDates = "'" + strings.Join(dates, "', '") + "'"
-	var aiRequestID string = "ranking3"
-
-	// Run the AI on the reports
-	runAiOnReports(reportDates, aiRequestID)
-
-	// Close the database connection
-	err = connectDB(false, config)
+	// Query the database
+	err = pgxscan.Select(context.Background(), db, reportPart, sqlStatement)
 	if err != nil {
-		log.Println("Error closing database: " + err.Error())
+		log.Println(sqlStatement)
+		log.Fatal("Error querying database: " + err.Error())
 	}
 }
 
-func runAiOnReports(reportDates string, aiRequestID string) {
-	// Get the reports
-	var rankReport []Report
-	var query string = fmt.Sprintf("select date, part, ar.content || ' ' || r.content as content FROM ism.reports r LEFT JOIN ism.ai_request ar ON r.part = ANY (ar.target_part) WHERE r.part = ANY (ar.target_part) and id = $$%s$$ and date in (%s)", aiRequestID, reportDates)
-	err := db.Select(&rankReport, query)
-	if err != nil {
-		log.Fatal("Error querying database: " + err.Error())
-	}
+func runAiOnReports(rankReportPart []Report) {
+	var err error
 
 	// Do the AI magic
 	var aiResponse []AiResponse
 	var aiIndustryRanks []AiIndustryRanks
-	for i := range rankReport {
-		fmt.Println("AI magic for: ", rankReport[i].Date, rankReport[i].Part)
-		aiResponse = append(aiResponse, AiMagic(rankReport[i].Content))
+	for i := range rankReportPart {
+		fmt.Println("AI magic for: ", rankReportPart[i].Date, rankReportPart[i].Part)
+		aiResponse = append(aiResponse, AiMagic(rankReportPart[i].Content))
 
 		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiIndustryRanks); err != nil {
 			log.Println("Error unmarshalling json: " + err.Error())
 		}
 		for x := range aiIndustryRanks {
-			aiIndustryRanks[x].Date = rankReport[i].Date
-			aiIndustryRanks[x].Part = rankReport[i].Part
-			aiIndustryRanks[x].AiRequestID = aiRequestID
+			aiIndustryRanks[x].Date = rankReportPart[i].Date
+			aiIndustryRanks[x].Part = rankReportPart[i].Part
+			aiIndustryRanks[x].AiRequestID = rankReportPart[i].AiRequestID
 		}
-
-		err = toDB("ism", "ai_industry_ranks", aiIndustryRanks)
+		// Send to database
+		err = toDB("ism", rankReportPart[i].TargetTable, aiIndustryRanks)
 		if err != nil {
 			log.Println("Error sending to database: " + err.Error())
 		}
-
 		// Clear the slice
 		aiIndustryRanks = aiIndustryRanks[:0]
 	}
 }
 
-func listenDbUpdates() error {
-	// Listen for updates to the ai_request table
-	// Establish a PostgreSQL connection
-	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.DB.Host, config.DB.Port, config.DB.User, config.DB.Pass, config.DB.DBname)
-	db, err := sqlx.Connect("postgres", psqlInfo)
-	if err != nil {
-		return err
-	}
-	defer func(db *sqlx.DB) {
-		err := db.Close()
-		if err != nil {
-			log.Fatal("Error closing the database:", err)
-		}
-	}(db)
+func runAiOnComments(commentReportPart []Report) {
+	var err error
+	// Do the AI magic
+	var aiResponse []AiResponse
+	var aiComments []AiComments
+	for i := range commentReportPart {
+		fmt.Println("AI magic for: ", commentReportPart[i].Date, commentReportPart[i].Part)
+		aiResponse = append(aiResponse, AiMagic(commentReportPart[i].Content))
 
-	// Enable LISTEN/NOTIFY feature for real-time notifications
-	listenChannel := make(chan string)
-	listener := pq.NewListener(psqlInfo, 10*time.Second, time.Minute, func(ev pq.ListenerEventType, err error) {
-		if err != nil {
-			log.Println("Listener error:", err)
+		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiComments); err != nil {
+			log.Println("Error unmarshalling json: " + err.Error())
 		}
-	})
-	defer func(listener *pq.Listener) {
-		err := listener.Close()
-		if err != nil {
-			log.Fatal("Error closing the listener:", err)
-		}
-	}(listener)
-
-	err = listener.Listen("tasks_update")
-	if err != nil {
-		log.Fatal("Error setting up LISTEN/NOTIFY:", err)
-	}
-
-	log.Println("Start monitoring PostgreSQL...")
-	go func() {
-		for {
-			select {
-			case n := <-listener.Notify:
-				// Notification received, execute your code here
-				fmt.Printf("Received notification: %+v\n", n)
-				listenChannel <- n.Channel
-			case <-time.After(5 * time.Second):
-				// Re-establish the listen connection after 5 seconds
-				err := listener.Ping()
-				if err != nil {
-					log.Println("Error pinging listener:", err)
-					return
-				}
+		var aiCommentsNullsRemoved []AiComments
+		for x := range aiComments {
+			aiComments[x].Date = commentReportPart[i].Date
+			aiComments[x].AiRequestID = commentReportPart[i].AiRequestID
+			if aiComments[x].Comment != "" {
+				aiCommentsNullsRemoved = append(aiCommentsNullsRemoved, aiComments[x])
 			}
 		}
-	}()
-
-	// Handle incoming signals to gracefully exit the program
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	for {
-		select {
-		case <-signalChan:
-			fmt.Printf("Received signal %s. Exiting...\n", signalChan)
-			os.Exit(0)
-		case notification := <-listenChannel:
-			// Execute your code here for each notification
-			fmt.Printf("Received notification: %s\n", notification)
+		// Send to database
+		err = toDB("ism", commentReportPart[i].TargetTable, aiCommentsNullsRemoved)
+		if err != nil {
+			log.Println("Error sending to database: " + err.Error())
 		}
+		// Clear the slice
+		aiComments = aiComments[:0]
 	}
 }

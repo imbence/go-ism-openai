@@ -20,9 +20,11 @@ type AiResponse struct {
 }
 
 type Report struct {
-	Date    string `db:"date"`
-	Part    string `db:"part"`
-	Content string `db:"content"`
+	Date        string `db:"date"`
+	Part        string `db:"part"`
+	Content     string `db:"content"`
+	TargetTable string `db:"target_table"`
+	AiRequestID string `db:"ai_request_id"`
 }
 
 type AiIndustryRanks struct {
@@ -32,6 +34,13 @@ type AiIndustryRanks struct {
 	Rank        int    `json:"rank"`
 	AiRequestID string `json:"ai_request_id"`
 	//Comment     string `json:"comment"`
+}
+
+type AiComments struct {
+	Date        string `json:"date"`
+	Industry    string `json:"industry"`
+	Comment     string `json:"comment"`
+	AiRequestID string `json:"ai_request_id"`
 }
 
 type PrimaryKey struct {
