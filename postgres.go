@@ -4,17 +4,16 @@ import (
 	"context"
 	"fmt"
 	"github.com/georgysavva/scany/v2/pgxscan"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
 	"reflect"
 	"strings"
 )
 
-var (
-	db *pgxpool.Pool
-)
-
 func toDB(schema string, table string, data interface{}) error {
+
+	type PrimaryKey struct {
+		ColumnName string `db:"column_name"`
+	}
 
 	var err error
 	var columnName []string
@@ -22,6 +21,7 @@ func toDB(schema string, table string, data interface{}) error {
 	var primaryKey []PrimaryKey
 	var primaryKeyColumn []string
 	var primaryKeyString string
+	var onConflictColumn []string
 	var onConflictKeyString string
 	var cellValue []string
 	var rowValue []string
@@ -29,28 +29,36 @@ func toDB(schema string, table string, data interface{}) error {
 
 	//get column names
 	sliceValue := reflect.ValueOf(data)
-	if sliceValue.Kind() != reflect.Slice {
-		return fmt.Errorf("data is not a slice")
-	}
-
-	// get column names and values
-	for i := 0; i < sliceValue.Len(); i++ {
-		item := sliceValue.Index(i)
-		if item.Kind() == reflect.Struct {
-			dataType := item.Type()
-			cellValue = cellValue[:0]
-			for j := 0; j < dataType.NumField(); j++ {
-				field := dataType.Field(j)
-				if i == 0 {
-					columnName = append(columnName, field.Tag.Get("json"))
-				}
-				cellValue = append(cellValue, fmt.Sprintf("$$%v$$", item.FieldByName(field.Name)))
-			}
-			rowValue = append(rowValue, "("+strings.Join(cellValue, ", ")+")")
+	if sliceValue.Kind() == reflect.Struct {
+		dataType := reflect.TypeOf(data)
+		dataValue := reflect.ValueOf(data)
+		for i := 0; i < dataType.NumField(); i++ {
+			field := dataType.Field(i)
+			columnName = append(columnName, field.Tag.Get("db"))
+			cellValue := fmt.Sprintf("$$%v$$", dataValue.Field(i))
+			rowValue = append(rowValue, cellValue)
 		}
+		rowValuesString = "(" + strings.Join(rowValue, ", ") + ")"
+	} else if sliceValue.Kind() == reflect.Slice {
+		// get column names and values
+		for i := 0; i < sliceValue.Len(); i++ {
+			item := sliceValue.Index(i)
+			if item.Kind() == reflect.Struct {
+				dataType := item.Type()
+				cellValue = cellValue[:0]
+				for j := 0; j < dataType.NumField(); j++ {
+					field := dataType.Field(j)
+					if i == 0 {
+						columnName = append(columnName, field.Tag.Get("db"))
+					}
+					cellValue = append(cellValue, fmt.Sprintf("$$%v$$", item.FieldByName(field.Name)))
+				}
+				rowValue = append(rowValue, "("+strings.Join(cellValue, ", ")+")")
+			}
+		}
+		rowValuesString = strings.Join(rowValue, ", ")
 	}
 	columnNameString = strings.ToLower(strings.Join(columnName, ", "))
-	rowValuesString = strings.Join(rowValue, ", ")
 
 	//get primary key
 	primaryKeyQuery := fmt.Sprintf("SELECT column_name FROM information_schema.key_column_usage WHERE table_name = '%s' and table_schema = '%s'", table, schema)
@@ -59,6 +67,7 @@ func toDB(schema string, table string, data interface{}) error {
 		log.Println("Error finding target table key columns in database: " + err.Error())
 		return err
 	}
+
 	//build primary key string
 	for i := range primaryKey {
 		primaryKeyColumn = append(primaryKeyColumn, primaryKey[i].ColumnName)
@@ -66,10 +75,10 @@ func toDB(schema string, table string, data interface{}) error {
 	primaryKeyString = strings.Join(primaryKeyColumn, ", ")
 
 	//build on conflict string
-	for i := range primaryKeyColumn {
-		primaryKeyColumn[i] = primaryKeyColumn[i] + " = excluded." + primaryKeyColumn[i]
+	for i := range columnName {
+		onConflictColumn = append(onConflictColumn, columnName[i]+" = excluded."+columnName[i])
 	}
-	onConflictKeyString = strings.Join(primaryKeyColumn, ", ")
+	onConflictKeyString = strings.Join(onConflictColumn, ", ")
 
 	//put together the query
 	sqlStatement := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES %s ON CONFLICT (%s) DO UPDATE SET %s", schema, table, columnNameString, rowValuesString, primaryKeyString, onConflictKeyString)

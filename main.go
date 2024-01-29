@@ -9,6 +9,13 @@ import (
 	"log"
 	"strings"
 	_ "strings"
+	"time"
+	_ "time"
+)
+
+var (
+	// db *pgx.Conn
+	db *pgxpool.Pool
 )
 
 func main() {
@@ -27,20 +34,87 @@ func main() {
 	}
 	defer db.Close()
 
-	// todo: start the magic from Grafana
-	// todo: implement db listener
-
-	//Run the AI on the reports
-	var rankReportPart []Report
-	getReportData("ranking3", []string{"2022-02-01"}, &rankReportPart)
-	runAiOnReports(rankReportPart)
-
-	// Run the AI on the comments
-	var commentReportPart []Report
-	getReportData("respondents1", []string{"2024-01-02", "2023-12-04", "2023-11-01", "2023-10-02", "2023-09-01", "2023-08-01", "2023-07-03", "2023-06-01", "2023-05-01", "2023-04-03", "2023-03-01", "2023-02-01", "2023-01-04", "2022-12-01", "2022-11-01", "2022-10-03", "2022-09-01", "2022-08-01", "2022-07-01", "2022-06-01", "2022-05-02", "2022-04-01", "2022-03-01", "2022-02-01", "2022-01-04"}, &commentReportPart)
-	runAiOnComments(commentReportPart)
-
+	// Listen to the channel
+	listenToChannel("run_tasks")
 }
+
+func listenToChannel(channelName string) {
+	conn, err := db.Acquire(context.Background())
+	if err != nil {
+		log.Println("Error acquiring connection from pool: ", err)
+		return
+	}
+	defer conn.Release()
+
+	_, err = conn.Exec(context.Background(), "LISTEN "+channelName)
+	if err != nil {
+		log.Println("Error listening to channel: ", err)
+		return
+	}
+
+	log.Println("Listening to channel", channelName)
+	for {
+		notification, err := conn.Conn().WaitForNotification(context.Background())
+		if err != nil {
+			log.Println("Error waiting for notification: ", err)
+			return
+		}
+		log.Println("Received notification from channel", notification.Channel+":", notification.Payload)
+		var aiTask []AiTasks
+		err = pgxscan.Select(context.Background(), db, &aiTask, `select task_id, ai_request_id, target_table, array_to_string(ai_request_dates, ', ') as ai_request_dates from ism.ai_tasks where ai_status = 'CREATED'`)
+		if err != nil {
+			log.Fatal("Error querying database, AI Tasks Table: " + err.Error())
+		} else if len(aiTask) > 0 {
+			executeTask(aiTask)
+		} else {
+			log.Println("No AI Tasks to execute")
+		}
+	}
+}
+
+func executeTask(aiTask []AiTasks) {
+	var err error
+	// Loop through the AI Tasks
+	for i := range aiTask {
+		log.Printf("AI Task Loaded with ID: %s RequestID: %s Target Table: %s For Dates: %s", aiTask[i].TaskID, aiTask[i].AiRequestID, aiTask[i].TargetTable, aiTask[i].AiRequestDates)
+
+		// Get the report data
+		var reportPart []Report
+		var aiTasksUpdate AiTasksUpdate
+		aiTasksUpdate.AiMeta = "{}"
+		getReportData(aiTask[i].AiRequestID, strings.Split(aiTask[i].AiRequestDates, ","), &reportPart)
+
+		// Run the AI
+		aiTasksUpdate.AiStartDate = time.Now().Format("2006-01-02 15:04:05")
+		switch aiTask[i].TargetTable {
+		case "ai_industry_ranks":
+			err = runAiOnReports(reportPart, aiTask[i].TaskID)
+		case "ai_comments":
+			err = runAiOnComments(reportPart, aiTask[i].TaskID)
+		}
+
+		// Update the AI Tasks table
+		aiTasksUpdate.TaskID = aiTask[i].TaskID
+		if err != nil {
+			log.Println("Error running AI: " + err.Error())
+			aiTasksUpdate.AiStatus = "FAILED"
+			aiTasksUpdate.AiMeta = fmt.Sprintf(`{"error": "%s"}`, err.Error())
+		} else {
+			aiTasksUpdate.AiStatus = "FINISHED"
+		}
+		aiTasksUpdate.AiFinishDate = time.Now().Format("2006-01-02 15:04:05")
+
+		// Send to database
+		err = toDB("ism", "ai_tasks", aiTasksUpdate)
+		if err != nil {
+			log.Println("Error sending to database: " + err.Error())
+		} else {
+			log.Println("AI Task Finished with ID: ", aiTasksUpdate.TaskID)
+		}
+		aiTasksUpdate = AiTasksUpdate{}
+	}
+}
+
 func getReportData(aiRequestID string, reportDate []string, reportPart interface{}) {
 	var err error
 	var reportDates = "'" + strings.Join(reportDate, "', '") + "'"
@@ -59,14 +133,13 @@ func getReportData(aiRequestID string, reportDate []string, reportPart interface
 	}
 }
 
-func runAiOnReports(rankReportPart []Report) {
+func runAiOnReports(rankReportPart []Report, taskID string) error {
 	var err error
-
 	// Do the AI magic
 	var aiResponse []AiResponse
 	var aiIndustryRanks []AiIndustryRanks
 	for i := range rankReportPart {
-		fmt.Println("AI magic for: ", rankReportPart[i].Date, rankReportPart[i].Part)
+		log.Println("AI magic for: ", rankReportPart[i].Date, rankReportPart[i].Part)
 		aiResponse = append(aiResponse, AiMagic(rankReportPart[i].Content))
 
 		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiIndustryRanks); err != nil {
@@ -76,6 +149,7 @@ func runAiOnReports(rankReportPart []Report) {
 			aiIndustryRanks[x].Date = rankReportPart[i].Date
 			aiIndustryRanks[x].Part = rankReportPart[i].Part
 			aiIndustryRanks[x].AiRequestID = rankReportPart[i].AiRequestID
+			aiIndustryRanks[x].TaskID = taskID
 		}
 		// Send to database
 		err = toDB("ism", rankReportPart[i].TargetTable, aiIndustryRanks)
@@ -85,15 +159,16 @@ func runAiOnReports(rankReportPart []Report) {
 		// Clear the slice
 		aiIndustryRanks = aiIndustryRanks[:0]
 	}
+	return err
 }
 
-func runAiOnComments(commentReportPart []Report) {
+func runAiOnComments(commentReportPart []Report, taskID string) error {
 	var err error
 	// Do the AI magic
 	var aiResponse []AiResponse
 	var aiComments []AiComments
 	for i := range commentReportPart {
-		fmt.Println("AI magic for: ", commentReportPart[i].Date, commentReportPart[i].Part)
+		log.Println("AI magic for: ", commentReportPart[i].Date, commentReportPart[i].Part)
 		aiResponse = append(aiResponse, AiMagic(commentReportPart[i].Content))
 
 		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiComments); err != nil {
@@ -103,6 +178,7 @@ func runAiOnComments(commentReportPart []Report) {
 		for x := range aiComments {
 			aiComments[x].Date = commentReportPart[i].Date
 			aiComments[x].AiRequestID = commentReportPart[i].AiRequestID
+			aiComments[x].TaskID = taskID
 			if aiComments[x].Comment != "" {
 				aiCommentsNullsRemoved = append(aiCommentsNullsRemoved, aiComments[x])
 			}
@@ -115,4 +191,5 @@ func runAiOnComments(commentReportPart []Report) {
 		// Clear the slice
 		aiComments = aiComments[:0]
 	}
+	return err
 }

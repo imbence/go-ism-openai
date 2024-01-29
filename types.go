@@ -1,22 +1,22 @@
 package main
 
 type AiResponse struct {
-	ID        string `json:"id"`
-	Object    string `json:"object"`
-	CreatedAt int    `json:"created_at"`
+	ID        string `db:"id"`
+	Object    string `db:"object"`
+	CreatedAt int    `db:"created_at"`
 	Choices   []struct {
-		Index   int `json:"index"`
+		Index   int `db:"index"`
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
+			Role    string `db:"role"`
+			Content string `db:"content"`
+		} `db:"message"`
+		FinishReason string `db:"finish_reason"`
+	} `db:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+		PromptTokens     int `db:"prompt_tokens"`
+		CompletionTokens int `db:"completion_tokens"`
+		TotalTokens      int `db:"total_tokens"`
+	} `db:"usage"`
 }
 
 type Report struct {
@@ -28,25 +28,33 @@ type Report struct {
 }
 
 type AiIndustryRanks struct {
-	Date        string `json:"date"`
-	Industry    string `json:"industry"`
-	Part        string `json:"part"`
-	Rank        int    `json:"rank"`
-	AiRequestID string `json:"ai_request_id"`
-	//Comment     string `json:"comment"`
+	Date        string `db:"date"`
+	Industry    string `db:"industry"`
+	Part        string `db:"part"`
+	Rank        int    `db:"rank"`
+	AiRequestID string `db:"ai_request_id"`
+	TaskID      string `db:"task_id"`
 }
 
 type AiComments struct {
-	Date        string `json:"date"`
-	Industry    string `json:"industry"`
-	Comment     string `json:"comment"`
-	AiRequestID string `json:"ai_request_id"`
+	Date        string `db:"date"`
+	Industry    string `db:"industry"`
+	Comment     string `db:"comment"`
+	AiRequestID string `db:"ai_request_id"`
+	TaskID      string `db:"task_id"`
 }
 
-type PrimaryKey struct {
-	ColumnName string `json:"column_name"`
+type AiTasks struct {
+	TaskID         string `db:"task_id"`
+	AiRequestID    string `db:"ai_request_id"`
+	TargetTable    string `db:"target_table"`
+	AiRequestDates string `db:"ai_request_dates"`
 }
 
-type Dates struct {
-	Date string `json:"date"`
+type AiTasksUpdate struct {
+	TaskID       string `db:"task_id"`
+	AiStatus     string `db:"ai_status"`
+	AiStartDate  string `db:"ai_start_date"`
+	AiFinishDate string `db:"ai_finish_date"`
+	AiMeta       string `db:"ai_meta"`
 }
