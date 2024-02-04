@@ -87,7 +87,7 @@ func toDB(schema string, table string, data interface{}) error {
 	_, err = db.Exec(context.Background(), sqlStatement)
 	if err != nil {
 		log.Println(sqlStatement)
-		log.Println("Send query to database failed: " + err.Error() + " Table: " + table)
+		log.Panicln("Send query to database failed: " + err.Error() + " Table: " + table)
 	}
 
 	return err

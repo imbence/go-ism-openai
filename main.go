@@ -15,10 +15,12 @@ import (
 
 var (
 	// db *pgx.Conn
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	version = "0.0.3"
 )
 
 func main() {
+	log.Println("Starting AI Engine version: " + version)
 	//Load the configuration
 	var err error
 	config, err = LoadConfiguration("config.json")
@@ -61,7 +63,7 @@ func listenToChannel(channelName string) {
 		}
 		log.Println("Received notification from channel", notification.Channel+":", notification.Payload)
 		var aiTask []AiTasks
-		err = pgxscan.Select(context.Background(), db, &aiTask, `select task_id, ai_request_id, target_table, array_to_string(ai_request_dates, ', ') as ai_request_dates from ism.ai_tasks where ai_status = 'CREATED'`)
+		err = pgxscan.Select(context.Background(), db, &aiTask, `select task_id, ai_request_id, air.target_table, array_to_string(ai_request_dates, ', ') as ai_request_dates from ism.ai_tasks ait left join ism.ai_request air on air.id = ait.ai_request_id where ai_status = 'CREATED'`)
 		if err != nil {
 			log.Fatal("Error querying database, AI Tasks Table: " + err.Error())
 		} else if len(aiTask) > 0 {
@@ -89,8 +91,10 @@ func executeTask(aiTask []AiTasks) {
 		switch aiTask[i].TargetTable {
 		case "ai_industry_ranks":
 			err = runAiOnReports(reportPart, aiTask[i].TaskID)
-		case "ai_comments":
+		case "ai_industry_comments":
 			err = runAiOnComments(reportPart, aiTask[i].TaskID)
+		default:
+			log.Println("No AI Task to run for: ", aiTask[i].TargetTable)
 		}
 
 		// Update the AI Tasks table
@@ -126,8 +130,7 @@ func getReportData(aiRequestID string, reportDate []string, reportPart interface
 		aiRequestID, reportDates)
 
 	// Query the database
-	err = pgxscan.Select(context.Background(), db, reportPart, sqlStatement)
-	if err != nil {
+	if err = pgxscan.Select(context.Background(), db, reportPart, sqlStatement); err != nil {
 		log.Println(sqlStatement)
 		log.Fatal("Error querying database: " + err.Error())
 	}
@@ -142,7 +145,7 @@ func runAiOnReports(rankReportPart []Report, taskID string) error {
 		log.Println("AI magic for: ", rankReportPart[i].Date, rankReportPart[i].Part)
 		aiResponse = append(aiResponse, AiMagic(rankReportPart[i].Content))
 
-		if err := json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiIndustryRanks); err != nil {
+		if err = json.Unmarshal([]byte(aiResponse[i].Choices[0].Message.Content), &aiIndustryRanks); err != nil {
 			log.Println("Error unmarshalling json: " + err.Error())
 		}
 		for x := range aiIndustryRanks {
@@ -152,8 +155,7 @@ func runAiOnReports(rankReportPart []Report, taskID string) error {
 			aiIndustryRanks[x].TaskID = taskID
 		}
 		// Send to database
-		err = toDB("ism", rankReportPart[i].TargetTable, aiIndustryRanks)
-		if err != nil {
+		if err = toDB("ism", rankReportPart[i].TargetTable, aiIndustryRanks); err != nil {
 			log.Println("Error sending to database: " + err.Error())
 		}
 		// Clear the slice
